@@ -7,6 +7,8 @@ pipeline {
         FULL_IMAGE_NAME = "${DOCKER_HUB_REPO}:${IMAGE_TAG}"
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
         NAMESPACE = 'bluegreen'
+        MAVEN_HOME = '/opt/maven'
+        PATH = "${MAVEN_HOME}/bin:${PATH}:/usr/local/bin"
     }
     
     parameters {
@@ -60,7 +62,12 @@ pipeline {
             steps {
                 echo "Building Spring Boot application..."
                 sh '''
-                    mvn clean compile test package -DskipTests=false
+                    # Use Maven from PATH or full path as fallback
+                    if command -v mvn &> /dev/null; then
+                        mvn clean compile test package -DskipTests=false
+                    else
+                        /opt/maven/bin/mvn clean compile test package -DskipTests=false
+                    fi
                 '''
             }
             post {
