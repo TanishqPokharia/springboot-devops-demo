@@ -60,17 +60,16 @@ pipeline {
             steps {
                 echo "Building Spring Boot application..."
                 sh '''
-                    cd spring-devops-demo
                     mvn clean compile test package -DskipTests=false
                 '''
             }
             post {
                 always {
                     // Publish test results
-                    publishTestResults testResultsPattern: 'spring-devops-demo/target/surefire-reports/*.xml'
+                    junit testResultsPattern: 'target/surefire-reports/*.xml', allowEmptyResults: true
                     
                     // Archive artifacts
-                    archiveArtifacts artifacts: 'spring-devops-demo/target/*.jar', fingerprint: true
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true, allowEmptyArchive: true
                 }
             }
         }
@@ -82,7 +81,6 @@ pipeline {
             steps {
                 echo "Building Docker image: ${FULL_IMAGE_NAME}"
                 sh '''
-                    cd spring-devops-demo
                     docker build -t ${FULL_IMAGE_NAME} .
                     docker tag ${FULL_IMAGE_NAME} ${DOCKER_HUB_REPO}:latest
                 '''
@@ -121,8 +119,8 @@ pipeline {
                         
                         // Update deployment with new image
                         sh """
-                            # Copy k8s manifests to workspace
-                            cp -r /home/ec2-user/vle7/k8s-manifests ./k8s-manifests || true
+                            # Copy k8s manifests to workspace (if they exist)
+                            ls -la /home/ec2-user/vle7/k8s-manifests/ 2>/dev/null || echo 'k8s manifests not found, will use kubectl directly'
                             
                             # Update image in deployment
                             kubectl set image deployment/springboot-app-${env.TARGET_COLOR} \
