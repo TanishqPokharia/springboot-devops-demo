@@ -1,10 +1,6 @@
 pipeline {
     agent any
     
-    tools {
-        maven 'Maven 3.8.1'
-    }
-    
     environment {
         // Docker Hub credentials ID (configure in Jenkins)
         DOCKER_HUB_CREDENTIALS = 'docker-hub-creds'
