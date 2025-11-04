@@ -61,14 +61,16 @@ pipeline {
             }
             steps {
                 echo "Building Spring Boot application..."
-                sh '''
-                    # Use Maven from PATH or full path as fallback
-                    if command -v mvn &> /dev/null; then
-                        mvn clean compile package -DskipTests=true
-                    else
-                        /opt/maven/bin/mvn clean compile package -DskipTests=true
-                    fi
-                '''
+                timeout(time: 10, unit: 'MINUTES') {
+                    sh '''
+                        # Use Maven from PATH or full path as fallback
+                        if command -v mvn &> /dev/null; then
+                            mvn clean compile package -DskipTests -Dmaven.test.skip=true -Dmaven.compile.fork=false
+                        else
+                            /opt/maven/bin/mvn clean compile package -DskipTests -Dmaven.test.skip=true -Dmaven.compile.fork=false
+                        fi
+                    '''
+                }
             }
             post {
                 always {
