@@ -12,7 +12,7 @@ pipeline {
         DOCKER_IMAGE_FULL = "${DOCKER_HUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
         
         // EC2 deployment details
-        EC2_HOST = '13.201.57.158'
+        EC2_HOST = '13.233.149.226'
         APP_PORT = '9090'
     }
     
