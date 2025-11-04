@@ -15,7 +15,8 @@ public class HealthController {
         health.put("status", "UP");
         health.put("timestamp", LocalDateTime.now());
         health.put("service", "spring-devops-demo");
-        health.put("version", "1.0.0");
+        health.put("version", "1.0.1");
+        health.put("message", "Auto-build pipeline enabled!");
         return health;
     }
 
