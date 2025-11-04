@@ -1,0 +1,259 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_HUB_REPO = 'tanishqpokharia/spring-devops-demo'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        FULL_IMAGE_NAME = "${DOCKER_HUB_REPO}:${IMAGE_TAG}"
+        KUBECONFIG = '/var/lib/jenkins/.kube/config'
+        NAMESPACE = 'bluegreen'
+    }
+    
+    parameters {
+        choice(
+            name: 'DEPLOYMENT_COLOR',
+            choices: ['green', 'blue'],
+            description: 'Choose deployment color (opposite of current active)'
+        )
+        booleanParam(
+            name: 'SWITCH_TRAFFIC',
+            defaultValue: false,
+            description: 'Switch traffic to new deployment after successful deployment'
+        )
+        booleanParam(
+            name: 'ROLLBACK',
+            defaultValue: false,
+            description: 'Rollback to previous version'
+        )
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Checking out code..."
+                checkout scm
+            }
+        }
+        
+        stage('Determine Active Color') {
+            steps {
+                script {
+                    // Get current active color from service
+                    def currentColor = sh(
+                        script: "kubectl get service springboot-service -n ${NAMESPACE} -o jsonpath='{.spec.selector.color}' || echo 'blue'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    env.CURRENT_ACTIVE_COLOR = currentColor ?: 'blue'
+                    env.TARGET_COLOR = params.DEPLOYMENT_COLOR ?: (currentColor == 'blue' ? 'green' : 'blue')
+                    
+                    echo "Current active color: ${env.CURRENT_ACTIVE_COLOR}"
+                    echo "Target deployment color: ${env.TARGET_COLOR}"
+                }
+            }
+        }
+        
+        stage('Build Application') {
+            when {
+                not { params.ROLLBACK }
+            }
+            steps {
+                echo "Building Spring Boot application..."
+                sh '''
+                    cd spring-devops-demo
+                    mvn clean compile test package -DskipTests=false
+                '''
+            }
+            post {
+                always {
+                    // Publish test results
+                    publishTestResults testResultsPattern: 'spring-devops-demo/target/surefire-reports/*.xml'
+                    
+                    // Archive artifacts
+                    archiveArtifacts artifacts: 'spring-devops-demo/target/*.jar', fingerprint: true
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            when {
+                not { params.ROLLBACK }
+            }
+            steps {
+                echo "Building Docker image: ${FULL_IMAGE_NAME}"
+                sh '''
+                    cd spring-devops-demo
+                    docker build -t ${FULL_IMAGE_NAME} .
+                    docker tag ${FULL_IMAGE_NAME} ${DOCKER_HUB_REPO}:latest
+                '''
+            }
+        }
+        
+        stage('Push Docker Image') {
+            when {
+                not { params.ROLLBACK }
+            }
+            steps {
+                echo "Pushing Docker image to Docker Hub..."
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', 
+                                                usernameVariable: 'DOCKER_USERNAME', 
+                                                passwordVariable: 'DOCKER_PASSWORD')]) {
+                    sh '''
+                        echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+                        docker push ${FULL_IMAGE_NAME}
+                        docker push ${DOCKER_HUB_REPO}:latest
+                    '''
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    if (params.ROLLBACK) {
+                        echo "Performing rollback..."
+                        sh """
+                            kubectl rollout undo deployment/springboot-app-${env.TARGET_COLOR} -n ${NAMESPACE}
+                            kubectl rollout status deployment/springboot-app-${env.TARGET_COLOR} -n ${NAMESPACE} --timeout=300s
+                        """
+                    } else {
+                        echo "Deploying to ${env.TARGET_COLOR} environment..."
+                        
+                        // Update deployment with new image
+                        sh """
+                            # Copy k8s manifests to workspace
+                            cp -r /home/ec2-user/vle7/k8s-manifests ./k8s-manifests || true
+                            
+                            # Update image in deployment
+                            kubectl set image deployment/springboot-app-${env.TARGET_COLOR} \
+                                springboot-app=${FULL_IMAGE_NAME} -n ${NAMESPACE}
+                            
+                            # Wait for rollout to complete
+                            kubectl rollout status deployment/springboot-app-${env.TARGET_COLOR} -n ${NAMESPACE} --timeout=600s
+                            
+                            # Verify deployment
+                            kubectl get pods -n ${NAMESPACE} -l version=${env.TARGET_COLOR}
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Health Check') {
+            steps {
+                echo "Performing health check on ${env.TARGET_COLOR} deployment..."
+                script {
+                    // Wait for pods to be ready
+                    sh """
+                        kubectl wait --for=condition=ready pod \
+                            -l app=springboot-app,version=${env.TARGET_COLOR} \
+                            -n ${NAMESPACE} --timeout=300s
+                    """
+                    
+                    // Test the service endpoint
+                    def healthCheck = sh(
+                        script: """
+                            # Get pod IP for direct testing
+                            POD_IP=\$(kubectl get pods -n ${NAMESPACE} -l version=${env.TARGET_COLOR} -o jsonpath='{.items[0].status.podIP}')
+                            echo "Testing health endpoint at pod IP: \$POD_IP"
+                            
+                            # Test health endpoint
+                            kubectl run test-pod --rm -i --restart=Never --image=curlimages/curl -- \
+                                curl -f http://\$POD_IP:9090/actuator/health
+                        """,
+                        returnStatus: true
+                    )
+                    
+                    if (healthCheck != 0) {
+                        error("Health check failed for ${env.TARGET_COLOR} deployment")
+                    }
+                    
+                    echo "Health check passed for ${env.TARGET_COLOR} deployment"
+                }
+            }
+        }
+        
+        stage('Switch Traffic') {
+            when {
+                expression { params.SWITCH_TRAFFIC }
+            }
+            steps {
+                script {
+                    echo "Switching traffic from ${env.CURRENT_ACTIVE_COLOR} to ${env.TARGET_COLOR}..."
+                    
+                    // Update service selector to point to new deployment
+                    sh """
+                        kubectl patch service springboot-service -n ${NAMESPACE} \
+                            -p '{"spec":{"selector":{"color":"${env.TARGET_COLOR}"}}}'
+                        
+                        echo "Traffic switched successfully!"
+                        echo "Service now pointing to: ${env.TARGET_COLOR}"
+                        
+                        # Verify the switch
+                        kubectl get service springboot-service -n ${NAMESPACE} -o yaml | grep -A 5 selector
+                    """
+                    
+                    env.NEW_ACTIVE_COLOR = env.TARGET_COLOR
+                }
+            }
+        }
+        
+        stage('Verification') {
+            steps {
+                echo "Verifying deployment..."
+                script {
+                    // Test the NodePort service
+                    def nodeIP = sh(
+                        script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"ExternalIP\")].address}' || kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type==\"InternalIP\")].address}'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    echo "Application should be accessible at: http://${nodeIP}:30090"
+                    
+                    // Show current deployments
+                    sh """
+                        echo "=== Current Deployments ==="
+                        kubectl get deployments -n ${NAMESPACE}
+                        
+                        echo "=== Current Pods ==="
+                        kubectl get pods -n ${NAMESPACE} -o wide
+                        
+                        echo "=== Current Services ==="
+                        kubectl get services -n ${NAMESPACE}
+                        
+                        echo "=== Active Service Configuration ==="
+                        kubectl describe service springboot-service -n ${NAMESPACE}
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo "Pipeline completed for ${env.TARGET_COLOR} deployment"
+            
+            // Clean up old Docker images locally
+            sh '''
+                docker image prune -f
+            '''
+        }
+        success {
+            echo "✅ Blue-Green deployment successful!"
+            script {
+                if (params.SWITCH_TRAFFIC) {
+                    echo "🔄 Traffic successfully switched to ${env.TARGET_COLOR}"
+                } else {
+                    echo "📋 Deployment completed. Use SWITCH_TRAFFIC parameter to switch traffic."
+                }
+            }
+        }
+        failure {
+            echo "❌ Blue-Green deployment failed!"
+            script {
+                // In case of failure, we might want to rollback automatically
+                echo "Check logs and consider rollback if needed"
+            }
+        }
+    }
+}
