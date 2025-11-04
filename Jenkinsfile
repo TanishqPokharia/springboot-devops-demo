@@ -32,25 +32,19 @@ pipeline {
         stage('Build') {
             steps {
                 echo 'Building application with Maven...'
-                sh '''
-                    cd spring-devops-demo
-                    mvn clean compile
-                '''
+                sh 'mvn clean compile'
             }
         }
         
         stage('Test') {
             steps {
                 echo 'Running unit tests...'
-                sh '''
-                    cd spring-devops-demo
-                    mvn test
-                '''
+                sh 'mvn test'
             }
             post {
                 always {
                     // Publish test results
-                    publishTestResults testResultsPattern: 'spring-devops-demo/target/surefire-reports/*.xml'
+                    publishTestResults testResultsPattern: 'target/surefire-reports/*.xml'
                 }
             }
         }
@@ -58,15 +52,12 @@ pipeline {
         stage('Package') {
             steps {
                 echo 'Packaging application...'
-                sh '''
-                    cd spring-devops-demo
-                    mvn package -DskipTests
-                '''
+                sh 'mvn package -DskipTests'
             }
             post {
                 success {
                     // Archive the JAR file
-                    archiveArtifacts artifacts: 'spring-devops-demo/target/*.jar', allowEmptyArchive: false
+                    archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: false
                 }
             }
         }
@@ -75,17 +66,9 @@ pipeline {
             steps {
                 echo "Building Docker image: ${DOCKER_IMAGE_FULL}"
                 script {
-                    // Copy Dockerfile to the Spring Boot project directory
-                    sh '''
-                        cp vle6/docker/Dockerfile spring-devops-demo/
-                        cp vle6/docker/.dockerignore spring-devops-demo/
-                    '''
-                    
-                    // Build Docker image
-                    dir('spring-devops-demo') {
-                        sh "docker build -t ${DOCKER_IMAGE_FULL} ."
-                        sh "docker tag ${DOCKER_IMAGE_FULL} ${DOCKER_HUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest"
-                    }
+                    // Build Docker image (Dockerfile is already in the project root)
+                    sh "docker build -t ${DOCKER_IMAGE_FULL} ."
+                    sh "docker tag ${DOCKER_IMAGE_FULL} ${DOCKER_HUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest"
                 }
             }
         }
