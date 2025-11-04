@@ -55,7 +55,7 @@ pipeline {
         
         stage('Build Application') {
             when {
-                not { params.ROLLBACK }
+                not { params.ROLLBACK == true }
             }
             steps {
                 echo "Building Spring Boot application..."
@@ -77,7 +77,7 @@ pipeline {
         
         stage('Build Docker Image') {
             when {
-                not { params.ROLLBACK }
+                not { params.ROLLBACK == true }
             }
             steps {
                 echo "Building Docker image: ${FULL_IMAGE_NAME}"
@@ -91,7 +91,7 @@ pipeline {
         
         stage('Push Docker Image') {
             when {
-                not { params.ROLLBACK }
+                not { params.ROLLBACK == true }
             }
             steps {
                 echo "Pushing Docker image to Docker Hub..."
