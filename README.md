@@ -77,19 +77,19 @@ If you have Maven installed globally:
 
 ### Testing Endpoints
 
-Once the application is running (default port 8080), test the endpoints:
+Once the application is running (default port 9090), test the endpoints:
 
 ```bash
 # Health checks
 curl http://localhost:8080/
-curl http://localhost:8080/health
-curl http://localhost:8080/actuator/health
+curl http://localhost:9090/health
+curl http://localhost:9090/actuator/health
 
 # Product endpoints
-curl http://localhost:8080/api/products
-curl http://localhost:8080/api/products/1
-curl http://localhost:8080/api/products/category/Electronics
-curl http://localhost:8080/api/products/stats
+curl http://localhost:9090/api/products
+curl http://localhost:9090/api/products/1
+curl http://localhost:9090/api/products/category/Electronics
+curl http://localhost:9090/api/products/stats
 ```
 
 ## Build Commands
@@ -130,17 +130,25 @@ mvn spring-boot:run
 java -jar target/spring-devops-demo-0.0.1-SNAPSHOT.jar
 ```
 
+## Docker Support
+
+### Running with Docker
+
+```bash
+# Build the container
+docker build -t spring-devops-demo .
+
+# Run the container
+docker run -p 9090:9090 spring-devops-demo
+```
+
 ## Configuration
 
 The application can be configured via `src/main/resources/application.properties`:
 
-- Server port: `server.port=8080`
+- Server port: `server.port=9090`
 - Actuator endpoints: `management.endpoints.web.exposure.include=health,info`
 - Logging level: `logging.level.com.devops.demo=INFO`
-
-## Docker Ready
-
-This application is ready for containerization. You can create a Dockerfile to build and deploy it in containers for your DevOps pipeline.
 
 ## DevOps Integration
 
